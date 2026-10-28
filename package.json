@@ -1,0 +1,15 @@
+{
+  "name": "pubmed-nbib-native-exporter",
+  "version": "2.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Export native PubMed NBIB files in automatically split date ranges.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node test.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

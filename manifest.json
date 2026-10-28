@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "PubMed 原生 NBIB 分段导出",
+  "version": "2.0.1",
+  "description": "自动拆分日期，在 PubMed 网页执行 Send to → Citation manager → Create file，保留原生 NBIB。",
+  "permissions": [
+    "downloads",
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://pubmed.ncbi.nlm.nih.gov/*",
+    "https://eutils.ncbi.nlm.nih.gov/*"
+  ],
+  "action": {
+    "default_title": "打开 PubMed 原生 NBIB 导出"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pubmed.ncbi.nlm.nih.gov/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "minimum_chrome_version": "109",
+  "version_name": "2.0.1 原生网页导出版（长检索式修复）"
+}
