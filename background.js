@@ -1,3 +1,4 @@
+import {assessResult,requestMatchesTerm} from './result-check.mjs';
 import './search-text.js';
 const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
 import {terminal,searchEntryURL,samePubMedTab,ownedPage,isNativeDownload,safeFilename,checkNativeFile} from './native-policy.mjs';
@@ -7,8 +8,8 @@ const load = async()=> (await chrome.storage.local.get('nativePending')).nativeP
 const save = async value=>chrome.storage.local.set({nativePending:value});
 async function refresh(pending) {
   if (!pending || terminal.has(pending.status)) return pending;
-  if (!pending.navigationVersion) {
-    pending.status='error';pending.error='已升级为 PubMed 网页表单提交，请重试当前分段。';await save(pending);return pending;
+  if ((pending.navigationVersion || 0)<3 && pending.downloadId===undefined) {
+    pending.status='error';pending.error='已升级结果页核对方式，请重试当前分段；已保存的文件会保留。';await save(pending);return pending;
   }
   if (pending.downloadId !== undefined) {
     const [item] = await chrome.downloads.search({id:pending.downloadId});
@@ -39,7 +40,7 @@ async function handle(message,sender) {
     }
     if (!tab) tab=await chrome.tabs.create({url:'about:blank',active:true});
     pending={token:message.token,term:message.term,expected:message.expected,filename:message.filename,
-      tabId:tab.id,navigationVersion:2,entryURL:searchEntryURL(message.token),status:'opening',stage:'正在打开 PubMed 首页，准备通过原生表单提交检索式',updated:Date.now()};
+      tabId:tab.id,navigationVersion:3,entryURL:searchEntryURL(message.token),status:'opening',stage:'正在打开 PubMed 首页，准备通过原生表单提交检索式',updated:Date.now()};
     await save(pending);
     await chrome.tabs.update(tab.id,{url:pending.entryURL});
     return pending;
@@ -64,17 +65,26 @@ async function handle(message,sender) {
       return {...pending,action:'submit-search'};
     }
     if(pending.status!=='searching') return null;
-    // The resulting URL may contain a PubMed-generated longquery token rather
-    // than the original query. Verify the displayed full search term instead.
-    if(typeof message.pageTerm!=='string' || normalizeTerm(message.pageTerm)!==normalizeTerm(pending.term)) {
-      pending.status='error';pending.error='无法确认网页中的完整检索式。请检查 PubMed 是否显示验证页面或 414 错误，再回工具页重试。';await save(pending);return null;
+    const verdict=assessResult(pending,message,url.href);
+    pending.verification={...verdict.diagnostics,method:verdict.method || null,code:verdict.code || 'verified'};
+    if(!verdict.ok) {
+      if(verdict.retry) {
+        pending.verificationStarted ??= Date.now();
+        if(Date.now()-pending.verificationStarted<30000) {
+          pending.stage=verdict.error;pending.updated=Date.now();await save(pending);
+          return {action:'wait-results',token:pending.token};
+        }
+      }
+      pending.status='error';pending.error=verdict.error+(verdict.retry?' 30 秒内未能完成核对，已停止以避免导错文献。':'');await save(pending);return null;
     }
-    pending.resultURL=url.href;pending.status='working';pending.stage='已通过网页表单检索，正在检查结果数量';pending.updated=Date.now();await save(pending);
+    pending.resultURL=url.href;pending.status='working';pending.stage='结果页检索来源已核对，正在准备原生导出';pending.updated=Date.now();await save(pending);
     return {...pending,action:'export'};
   }
   if(!ownedPage(pending,sender)) return null;
   if(message.type==='native-search-submitted') {
     if(message.token!==pending.token || pending.status!=='preparing' || (sender.url || sender.tab.url)!==pending.entryURL) return null;
+    if(typeof message.submittedTerm!=='string' || normalizeTerm(message.submittedTerm)!==normalizeTerm(pending.term)) throw new Error('原生表单提交前的完整检索式未通过核对。');
+    pending.submission={confirmed:true,confirmedAt:Date.now(),requestMatched:false};
     pending.status='searching';pending.stage='正在由 PubMed 原生表单处理检索式';pending.updated=Date.now();await save(pending);return {ok:true};
   }
   if(message.token!==pending.token || terminal.has(pending.status)) return null;
@@ -129,11 +139,17 @@ chrome.action.onClicked.addListener(async()=>{
 chrome.webRequest.onBeforeRequest.addListener(details=>{
   serial(async()=>{
     const pending=await load();
-    if(pending?.tabId!==details.tabId || pending.status!=='armed') return;
+    if(pending?.tabId!==details.tabId) return;
+    if(pending.status==='searching') {
+      if(pending.submission?.confirmed && requestMatchesTerm(details,pending.term)) pending.submission.requestMatched=true;
+      if(details.type==='main_frame' && pending.submission?.confirmed && (!pending.searchNavigation || pending.searchNavigation.requestId===details.requestId)) pending.searchNavigation={url:details.url,time:details.timeStamp,token:pending.token,requestId:details.requestId};
+      await save(pending);return;
+    }
+    if(pending.status!=='armed')return;
     pending.requests=[...(pending.requests || []).slice(-19),{url:details.url,time:details.timeStamp}];
     await save(pending);
   }).catch(()=>{});
-},{urls:['https://pubmed.ncbi.nlm.nih.gov/*']});
+},{urls:['https://pubmed.ncbi.nlm.nih.gov/*']},['requestBody']);
 
 chrome.webRequest.onCompleted.addListener(details=>{
   if(details.statusCode!==414) return;

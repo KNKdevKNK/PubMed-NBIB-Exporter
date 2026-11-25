@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parent.parent
 version = json.loads((root / "manifest.json").read_text(encoding="utf-8"))["version"]
 files = ["manifest.json", "index.html", "style.css", "api.mjs", "app.mjs",
          "background.js", "search-text.js", "content.js", "core.mjs", "native-policy.mjs",
-         "runner.mjs", "README.md", "README.en.md", "使用说明.md", "CHANGELOG.md"]
+         "runner.mjs", "result-check.mjs", "README.md", "README.en.md", "使用说明.md", "CHANGELOG.md"]
 dist = root / "dist"
 dist.mkdir(exist_ok=True)
 target = dist / f"PubMed-NBIB-Native-v{version}.zip"

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.3 (2026-11-25)
+
+- Stop treating every missing or non-identical result-page input as a CAPTCHA/HTTP 414 error.
+- Wait for native result and export controls, and inspect full-query metadata in addition to search inputs and URL terms.
+- Bind opaque longquery results to confirmed native form readback, the first observed navigation and matching counts; use complete native GET/POST query evidence when available. Do not authorize unrelated results by count alone.
+- Distinguish actual verification pages, detected HTTP 414, loading and unavailable query provenance in diagnostics.
+- Keep existing completed downloads while making older in-flight verification states retryable.
+- Add nine offline regressions covering metadata, opaque/missing inputs, unrelated navigation, native request bodies and loading. All 32 offline checks pass; live PubMed integration is not independently verified for this patch.
+
 ## 2.0.2 (2026-11-25)
 
 - Fix false search-input write failures for pasted multiline queries. Single-line HTML input sanitization removes CR/LF; normalize pasted line/tab separators to spaces before assignment.

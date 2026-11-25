@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {newNativeJob,runNativeJob} from './runner.mjs';
 import {searchEntryURL,ownedPage,isNativeDownload,safeFilename,checkNativeFile} from './native-policy.mjs';
 import {split,dateNumber,rootTerm} from './core.mjs';
+import {assessResult,requestMatchesTerm} from './result-check.mjs';
 const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
 const contentSource=await readFile(new URL('./search-text.js',import.meta.url),'utf8')+'\n'+await readFile(new URL('./content.js',import.meta.url),'utf8');
 const nativeURL=term=>'https://pubmed.ncbi.nlm.nih.gov/?term='+encodeURIComponent(term);
@@ -55,17 +56,17 @@ function ioFor(search,exportNative) {let persisted;return {check(){},progress(){
   const io=ioFor(async()=>({count:0}),async()=>{exports++;});
   await runNativeJob(job,io);assert.equal(exports,0);assert.equal(job.status,'complete');pass('empty results never create a file');
 }
-async function contentFixture({count=2,selectable=true}={}) {
-  let state=0;const actions=[];let finish;
+async function contentFixture({count=2,selectable=true,waitReady=false,metadataTerm=null}={}) {
+  let state=0;const actions=[];const readyMessages=[];let finish;
   const completed=new Promise(resolve=>{finish=resolve;});
   const optionPage={value:'page',textContent:'All results on this page'},optionAll={value:'all',textContent:'All results'};
   const select={options:selectable?[optionPage,optionAll]:[optionPage],_value:'page',get value(){return this._value;},set value(v){this._value=v;},get selectedOptions(){return this.options.filter(o=>o.value===this._value);},getClientRects:()=>[{}],getAttribute:()=>null,dispatchEvent(){}};
   const scope={querySelectorAll:selector=>selector==='select'?[select]:[]};
-  function button(text,step,next) {return {textContent:text,disabled:false,getAttribute:()=>null,getClientRects:()=>state===step?[{}]:[],closest:selector=>selector==='form'?scope:null,click(){actions.push(text);state=next;if(text==='Create file') finish({actions,select});}};}
+  function button(text,step,next) {return {textContent:text,disabled:false,getAttribute:()=>null,getClientRects:()=>state===step?[{}]:[],closest:selector=>selector==='form'?scope:null,click(){actions.push(text);state=next;if(text==='Create file') finish({actions,select,readyMessages});}};}
   const controls=[button('Send to',0,1),button('Citation manager',1,2),button('Create file',2,3)];
-  const document={addEventListener(){},querySelector:selector=>selector==='meta[name="ncbi_resultcount"]'?{content:String(count)}:null,querySelectorAll:()=>controls,getElementById:()=>null};
+  const document={addEventListener(){},querySelector:selector=>selector==='meta[name="ncbi_resultcount"]'?{content:String(count)}:null,querySelectorAll:selector=>selector.startsWith('meta[')?(metadataTerm?[{name:'ncbi_term',content:metadataTerm}]:[]):selector.startsWith('input#id_term')?[]:controls,getElementById:()=>null};
   const chrome={runtime:{sendMessage:async message=>{
-    if(message.type==='native-ready')return {ok:true,value:{token:'t',expected:2}};
+    if(message.type==='native-ready'){readyMessages.push(message);return {ok:true,value:waitReady && readyMessages.length===1?{action:'wait-results'}:{token:'t',expected:2}};}
     if(message.type==='native-arm') {
       if(message.count!==2) {finish({actions,mismatch:true});return {ok:true,value:{ok:false}};}
       assert.equal(select.value,'all');return {ok:true,value:{ok:true}};
@@ -84,12 +85,12 @@ async function contentFixture({count=2,selectable=true}={}) {
 }
 {
   // Service worker integration: browser-origin native download, not downloads.download().
-  let onMessage,onFilename,onChanged;
+  let onMessage,onFilename,onChanged,onRequest;
   const data={};let browserItem;
   const chrome={runtime:{id:'test',getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>{onMessage=fn;}}},
     storage:{local:{get:async key=>({[key]:structuredClone(data[key])}),set:async obj=>{Object.assign(data,structuredClone(obj));},remove:async key=>{delete data[key];}}},
     tabs:{create:async()=>({id:7}),update:async()=>{},query:async()=>[],get:async()=>({id:7,url:'https://pubmed.ncbi.nlm.nih.gov/'}),onRemoved:{addListener(){}}},
-    action:{onClicked:{addListener(){}}},webRequest:{onBeforeRequest:{addListener(){}},onCompleted:{addListener(){}}},
+    action:{onClicked:{addListener(){}}},webRequest:{onBeforeRequest:{addListener:fn=>{onRequest=fn;}},onCompleted:{addListener(){}}},
     downloads:{download:()=>{throw new Error('must not generate native downloads from extension');},search:async()=>[browserItem],onDeterminingFilename:{addListener:fn=>{onFilename=fn;}},onChanged:{addListener:fn=>{onChanged=fn;}}}};
   globalThis.chrome=chrome;await import('./background.js');
   const ui={id:'test',url:'chrome-extension://test/index.html'};
@@ -97,9 +98,9 @@ async function contentFixture({count=2,selectable=true}={}) {
   await send({type:'native-start',token:'x',term:'asthma[ti]',expected:2,filename:'PubMedNative_test/0001.nbib'});
   const entry={id:'test',tab:{id:7},url:searchEntryURL('x')};
   const prepare=await send({type:'native-ready',pageTerm:''},entry);assert.equal(prepare.action,'submit-search');
-  await send({type:'native-search-submitted',token:'x'},entry);
+  await send({type:'native-search-submitted',token:'x',submittedTerm:'asthma[ti]'},entry);
   const page={id:'test',tab:{id:7,url:nativeURL('asthma[ti]')},url:nativeURL('asthma[ti]')};
-  await send({type:'native-ready',pageTerm:'asthma[ti]'},page);await send({type:'native-arm',token:'x',count:2},page);
+  await send({type:'native-ready',pageTerm:'asthma[ti]',pageCount:2,hasResults:true,hasExportControls:true},page);await send({type:'native-arm',token:'x',count:2},page);
   browserItem={...item,id:44,state:'in_progress',bytesReceived:0};
   const suggestion=await new Promise(resolve=>onFilename(browserItem,resolve));
   assert.equal(suggestion.filename,'PubMedNative_test/0001.nbib');
@@ -115,10 +116,10 @@ async function contentFixture({count=2,selectable=true}={}) {
   assert(longPending.entryURL.length<200);assert(!longPending.entryURL.includes('disease'));
   const longEntry={id:'test',tab:{id:7},url:longPending.entryURL};
   const input=await send({type:'native-ready',pageTerm:''},longEntry);assert.equal(input.term,longTerm);
-  await send({type:'native-search-submitted',token:'long-token'},longEntry);
+  await send({type:'native-search-submitted',token:'long-token',submittedTerm:normalizeTerm(longTerm)},longEntry);
   const aliasURL=nativeURL('longquery-test-generated-by-pubmed');
   const aliasPage={id:'test',tab:{id:7},url:aliasURL};
-  const verified=await send({type:'native-ready',pageTerm:normalizeTerm(longTerm)},aliasPage);
+  const verified=await send({type:'native-ready',pageTerm:normalizeTerm(longTerm),pageCount:2,hasResults:true,hasExportControls:true},aliasPage);
   assert.equal(verified.action,'export');assert.equal(verified.resultURL,aliasURL);
   await send({type:'native-arm',token:'long-token',count:2},aliasPage);
   browserItem={...item,id:45,state:'in_progress',referrer:aliasURL,bytesReceived:0};
@@ -128,6 +129,24 @@ async function contentFixture({count=2,selectable=true}={}) {
   onChanged({id:45,state:{current:'complete'}});
   assert.equal((await send({type:'native-status',token:'long-token'})).status,'complete');
   pass('long-query homepage handshake verifies full displayed query and accepts PubMed-generated short alias download');
+
+  // A longquery result page may contain no original query input at all.
+  const proofTerm='(asthma[ti] OR child[ti]) AND 2024[dp]';
+  await send({type:'native-start',token:'proof',term:proofTerm,expected:2,filename:'PubMedNative_test/0003.nbib'});
+  const proofEntry={id:'test',tab:{id:7},url:searchEntryURL('proof')};
+  await send({type:'native-ready'},proofEntry);
+  await send({type:'native-search-submitted',token:'proof',submittedTerm:proofTerm},proofEntry);
+  const proofURL=nativeURL('longqueryproof123');
+  onRequest({tabId:7,type:'xmlhttprequest',url:'https://pubmed.ncbi.nlm.nih.gov/longquery/',timeStamp:Date.now()+1,
+    requestBody:{formData:{term:[proofTerm]}}});
+  onRequest({tabId:7,type:'main_frame',url:proofURL,timeStamp:Date.now()+2,requestId:'first-search'});
+  onRequest({tabId:7,type:'main_frame',url:nativeURL('longqueryunrelated'),timeStamp:Date.now()+3,requestId:'another-search'});
+  await send({type:'native-status',token:'proof'}); // Flush ordered request observations.
+  assert.equal(data.nativePending.searchNavigation.url,proofURL);
+  const proofPage={id:'test',tab:{id:7},url:proofURL};
+  const proven=await send({type:'native-ready',pageTerm:'longqueryproof123',pageTerms:[],pageCount:2,hasResults:true,hasExportControls:true},proofPage);
+  assert.equal(proven.action,'export');assert.equal(proven.verification.method,'verified-native-request-and-navigation');
+  pass('background integrates actual native submit/body proof and retains the first navigation against unrelated later searches');
   // Requests left open by 2.0.0 must become retryable, not wait indefinitely.
   data.nativePending={token:'legacy',status:'opening',tabId:7,updated:Date.now()};
   const legacy=await send({type:'native-status',token:'legacy'});
@@ -150,7 +169,7 @@ async function contentFixture({count=2,selectable=true}={}) {
   const button={type:'submit',disabled:false,textContent:'Search',getAttribute:()=>null,getClientRects:()=>[{}],click(){events.push('native-search-click');resolveFinished();}};
   const form={action:'https://pubmed.ncbi.nlm.nih.gov/',method:'get',querySelectorAll:()=>[button]};
   const field={value:'',form,getClientRects:()=>[{}],focus(){},dispatchEvent(event){events.push(event.type);}};
-  const document={querySelector:()=>field,querySelectorAll:()=>[field]};
+  const document={querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('input#id_term')?[field]:[]};
   const chrome={runtime:{sendMessage:async message=>{
     if(message.type==='native-ready')return {ok:true,value:{action:'submit-search',token:'long',term:fullTerm}};
     if(message.type==='native-search-submitted'){events.push('checkpoint-before-submit');return {ok:true,value:{ok:true}};}
@@ -199,7 +218,7 @@ async function writeSearchFixture(term,{wrapped=false,truncate=0,textarea=false,
   const button={type:'submit',disabled:false,textContent:'Search',getAttribute:()=>null,getClientRects:()=>[{}],click(){actions.push('submit');done({field,actions,wrapperCalls});}};
   const form={action:'https://pubmed.ncbi.nlm.nih.gov/',querySelectorAll:()=>[button]};field.form=form;
   const hidden={value:'hidden stale query',type:'hidden',getClientRects:()=>[]};
-  const document={querySelectorAll:()=>hiddenFirst?[hidden,field]:[field]};
+  const document={querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('input#id_term')?(hiddenFirst?[hidden,field]:[field]):[]};
   const chrome={runtime:{sendMessage:async message=>{
     if(message.type==='native-ready')return {ok:true,value:{action:'submit-search',token:'multiline',term}};
     if(message.type==='native-search-submitted')return {ok:true,value:{ok:true}};
@@ -223,6 +242,53 @@ async function writeSearchFixture(term,{wrapped=false,truncate=0,textarea=false,
   const truncated=await writeSearchFixture(term,{truncate:10});
   assert(truncated.error.includes('截短'));assert(!truncated.actions.includes('submit'));
   pass('actual truncated query still blocks native submission instead of weakening integrity checks');
+}
+
+{
+  const term='(asthma[ti]) AND ("2024/01/01"[dp] : "2024/01/02"[dp])';
+  const url=nativeURL('longqueryabc123');
+  const base={term,token:'results',expected:42,submission:{confirmed:true,confirmedAt:1000},searchNavigation:{url,time:1001,token:'results'}};
+  const evidence={pageTerm:'',pageCount:42,hasResults:true,hasExportControls:true,pageTerms:[]};
+  assert(assessResult(base,{...evidence,pageTerms:[{source:'meta-ncbi_term',value:term}]},url).ok);
+  pass('normal results verified from full query metadata when visible search field is missing');
+  assert(assessResult(base,{...evidence,pageTerm:'longqueryabc123'},url).ok);
+  assert(assessResult(base,evidence,url).ok);
+  pass('opaque alias and missing input use confirmed native submit, first navigation and equal count together');
+  assert(!assessResult({...base,submission:undefined},evidence,url).ok);
+  assert(!assessResult({...base,searchNavigation:undefined},evidence,url).ok);
+  assert(!assessResult(base,{...evidence,pageCount:43},url).ok);
+  assert(!assessResult(base,evidence,nativeURL('longqueryother')).ok);
+  pass('alias acceptance rejects missing submission, missing navigation, wrong counts and another result URL');
+  assert(!assessResult(base,{...evidence,pageTerm:'diabetes[ti]'},url).ok);
+  assert(!assessResult(base,{...evidence,pageTerm:'diabetes[ti]'},nativeURL('diabetes[ti]')).ok);
+  pass('normal results and matching count alone never authorize an unrelated explicit search');
+  const networkBound={...base,submission:{...base.submission,requestMatched:true}};
+  assert(assessResult(networkBound,{...evidence,pageTerm:term.slice(0,25)},url).ok);
+  pass('verified complete native request binds a shortened UI representation to the original search');
+  const loading=assessResult(base,{...evidence,hasExportControls:false},url);
+  assert(!loading.ok && loading.retry && loading.code==='loading');
+  const challenge=assessResult(base,{...evidence,pageError:'verification-page'},url);
+  assert(!challenge.ok && !challenge.retry && challenge.error.includes('验证'));
+  const tooLong=assessResult(base,{...evidence,pageError:'http-414'},url);
+  assert(!tooLong.ok && !tooLong.retry && tooLong.error.includes('414'));
+  pass('loading, detected verification page and detected HTTP 414 have distinct diagnostics');
+  assert(requestMatchesTerm({url:nativeURL(term)},term));
+  assert(requestMatchesTerm({url:'https://pubmed.ncbi.nlm.nih.gov/',requestBody:{formData:{term:[term]}}},term));
+  const raw=text=>[{bytes:new TextEncoder().encode(text).buffer}];
+  assert(requestMatchesTerm({url:'https://pubmed.ncbi.nlm.nih.gov/',requestBody:{raw:raw(JSON.stringify({query:term}))}},term));
+  assert(requestMatchesTerm({url:'https://pubmed.ncbi.nlm.nih.gov/',requestBody:{raw:raw(new URLSearchParams({term}).toString())}},term));
+  assert(!requestMatchesTerm({url:nativeURL('diabetes[ti]'),requestBody:{raw:raw('{broken')}},term));
+  pass('complete search proof matches real GET, form POST, JSON and URL-encoded bodies without treating broken or unrelated text as proof');
+}
+
+{
+  const term='asthma[ti] AND 2024[dp]';
+  const loaded=await contentFixture({waitReady:true,metadataTerm:term});
+  assert.equal(loaded.readyMessages.length,2);
+  assert.equal(loaded.readyMessages[1].pageCount,2);
+  assert(loaded.readyMessages[1].pageTerms.some(item=>item.source==='meta-ncbi_term' && item.value===term));
+  assert.deepEqual(loaded.actions,['Send to','Citation manager','Create file']);
+  pass('content waits for ready evidence, reads full-query metadata and then performs native export');
 }
 for(const filename of ['api.mjs','app.mjs','background.js','content.js','runner.mjs']) {
   const source=await readFile(new URL(filename,import.meta.url),'utf8');

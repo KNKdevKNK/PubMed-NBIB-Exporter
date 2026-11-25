@@ -2,9 +2,11 @@
 
 A Chrome / Edge Manifest V3 extension that splits large PubMed searches into manageable date ranges and downloads **native NBIB files** through **Send to → Citation manager → All results → Create file**.
 
-[中文说明](README.md) · [Download v2.0.2](dist/PubMed-NBIB-Native-v2.0.2.zip)
+[中文说明](README.md) · [Download v2.0.3](dist/PubMed-NBIB-Native-v2.0.3.zip)
 
 Version 2.0.2 normalizes pasted line/tab separators to spaces before count queries, native search entry, and result-page verification. It fixes false write failures in single-line search inputs while continuing to reject truncated or altered queries.
+
+Version 2.0.3 verifies result provenance using native form readback, the first observed navigation, query metadata, matching request terms and result counts. Missing or opaque search fields no longer automatically produce a misleading verification/414 error.
 
 ## Install
 
@@ -26,7 +28,7 @@ Open the NBIB file in EndNote or use **File → Import → File → PubMed (NLM)
 
 ## Limitations and privacy
 
-Version 2.0.1 has been reported working by a user and the project now passes 23 offline checks. Maintainer-controlled live browser/EndNote integration and 100,000-record scale runs have not been independently verified. Test a small range first.
+Version 2.0.1 has been reported working by a user and the project now passes 32 offline checks. Maintainer-controlled live browser/EndNote integration and 100,000-record scale runs have not been independently verified. Test a small range first.
 
 Counts are taken before export; the extension does not read NBIB bodies to validate individual records. PubMed may change during a task. Website changes, browser policies, verification pages, and other download extensions may interrupt automation.
 

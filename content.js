@@ -4,7 +4,7 @@
   const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
   const visible=el=>Boolean(el && el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
   const normalize=text=>String(text || '').replace(/\s+/g,' ').trim();
-  const label=el=>normalize(el.getAttribute('aria-label') || el.value || el.textContent);
+  const label=el=>normalize(el.getAttribute('aria-label')) || normalize(el.textContent) || normalize(el.value);
   const control=pattern=>[...document.querySelectorAll('button,a,[role="button"],[role="menuitem"],input[type="submit"]')]
     .find(el=>visible(el) && !el.disabled && pattern.test(label(el)));
   async function waitFor(getter,description,timeout=30000) {
@@ -61,14 +61,36 @@
       const button=[...form.querySelectorAll('button,input[type="submit"]')].find(el=>visible(el) && !el.disabled &&
         (el.type==='submit' || /^Search$/i.test(label(el))));
       if(!button && typeof form.requestSubmit!=='function') throw new Error('找不到原生搜索按钮。');
-      const armed=await rpc('native-search-submitted',data);
+      const armed=await rpc('native-search-submitted',{...data,submittedTerm:expected});
       if(!armed?.ok) throw new Error('无法确认搜索提交状态，请重试。');
       if(normalizeTerm(searchField()?.value)!==expected) throw new Error('搜索框在提交前被网页改动，已停止，请重试。');
       if(button) button.click();else form.requestSubmit();
     } catch(error) {await rpc('native-error',{...data,error:error.message});}
   }
+  function resultEvidence() {
+    const terms=[];
+    for(const field of document.querySelectorAll('input#id_term, textarea#id_term, input[name="term"], textarea[name="term"]')) {
+      if(typeof field.value==='string')terms.push({source:visible(field)?'visible-search-field':'hidden-search-field',value:field.value});
+    }
+    for(const meta of document.querySelectorAll('meta[name="ncbi_term"],meta[name="ncbi_query"]')) {
+      if(meta.content)terms.push({source:'meta-'+meta.name,value:meta.content});
+    }
+    const pageCount=countResults();
+    const title=document.title || '';
+    const heading=document.querySelector('h1')?.textContent || '';
+    let pageError=null;
+    if(/Submitted URI too large|Error 414/i.test(title+' '+heading))pageError='http-414';
+    else if(pageCount===null && /checking your browser|recaptcha|verify you are human/i.test(title+' '+heading))pageError='verification-page';
+    return {pageTerm:displayedTerm(),pageTerms:terms,pageCount,hasResults:pageCount!==null,
+      hasExportControls:Boolean(control(/^Send to/i)),pageError};
+  }
   async function run() {
-    const task=await rpc('native-ready',{pageTerm:displayedTerm()});if(!task) return;
+    let task;
+    do {
+      task=await rpc('native-ready',resultEvidence());
+      if(task?.action==='wait-results')await new Promise(resolve=>setTimeout(resolve,750));
+    } while(task?.action==='wait-results');
+    if(!task)return;
     if(task.action==='submit-search') {await submitSearch(task);return;}
     const data={token:task.token};
     document.addEventListener('click',event=>{

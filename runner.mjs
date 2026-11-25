@@ -31,7 +31,7 @@ export async function runNativeJob(job,io) {
     if(result.status!=='complete') throw new Error(result.error || 'PubMed 原生文件导出未完成。');
     if(job.done.some(part=>part.token===task.token)) throw new Error('重复提交同一分段，已停止。');
     const part={...task,downloadId:result.downloadId,originalFilename:result.originalFilename,
-      actualFilename:result.actualFilename,sourceURL:result.sourceURL,bytes:result.bytes,
+      actualFilename:result.actualFilename,sourceURL:result.sourceURL,bytes:result.bytes,verification:result.verification,
       note:'篇数为网页导出前显示的数量；未读取或改写原生文件内容。'};
     const next={...job,done:[...job.done,part],pending:job.pending.slice(1),active:null};
     await io.save(next);Object.assign(job,next);
