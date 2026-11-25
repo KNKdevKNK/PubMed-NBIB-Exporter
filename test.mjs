@@ -3,7 +3,9 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {newNativeJob,runNativeJob} from './runner.mjs';
 import {searchEntryURL,ownedPage,isNativeDownload,safeFilename,checkNativeFile} from './native-policy.mjs';
-import {split,dateNumber} from './core.mjs';
+import {split,dateNumber,rootTerm} from './core.mjs';
+const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
+const contentSource=await readFile(new URL('./search-text.js',import.meta.url),'utf8')+'\n'+await readFile(new URL('./content.js',import.meta.url),'utf8');
 const nativeURL=term=>'https://pubmed.ncbi.nlm.nih.gov/?term='+encodeURIComponent(term);
 let checks=0;const pass=name=>{checks++;console.log('PASS',name);};
 const config={term:'asthma[ti]',start:'2024-01-01',end:'2024-01-02',field:'dp',limit:100};
@@ -71,7 +73,7 @@ async function contentFixture({count=2,selectable=true}={}) {
     if(message.type==='native-error')finish({actions,error:message.error});
     return {ok:true,value:{ok:true}};
   }}};
-  vm.runInNewContext(await readFile(new URL('./content.js',import.meta.url),'utf8'),{window:{},document,chrome,getComputedStyle:()=>({visibility:'visible'}),Event:class{},setTimeout});
+  vm.runInNewContext(contentSource,{window:{},document,chrome,getComputedStyle:()=>({visibility:'visible'}),Event:class{},setTimeout});
   return await completed;
 }
 {
@@ -107,7 +109,7 @@ async function contentFixture({count=2,selectable=true}={}) {
   assert.equal(result.status,'complete');assert.equal(result.bytes,321);assert.equal(result.downloadId,44);assert.equal(result.originalFilename,item.filename);
   const again=await send({type:'native-start',token:'x',term:'asthma[ti]',expected:2,filename:'PubMedNative_test/0001.nbib'});
   assert.equal(again.downloadId,44);
-  const longTerm=Array.from({length:2000},(_,i)=>`disease${i}[tiab]`).join(' OR ');
+  const longTerm=Array.from({length:2000},(_,i)=>`disease${i}[tiab]`).join(' OR ')+'\r\nAND\t"air  pollution"[tiab]\n';
   const longTask={type:'native-start',token:'long-token',term:longTerm,expected:2,filename:'PubMedNative_test/0002.nbib'};
   const longPending=await send(longTask);
   assert(longPending.entryURL.length<200);assert(!longPending.entryURL.includes('disease'));
@@ -116,7 +118,7 @@ async function contentFixture({count=2,selectable=true}={}) {
   await send({type:'native-search-submitted',token:'long-token'},longEntry);
   const aliasURL=nativeURL('longquery-test-generated-by-pubmed');
   const aliasPage={id:'test',tab:{id:7},url:aliasURL};
-  const verified=await send({type:'native-ready',pageTerm:longTerm},aliasPage);
+  const verified=await send({type:'native-ready',pageTerm:normalizeTerm(longTerm)},aliasPage);
   assert.equal(verified.action,'export');assert.equal(verified.resultURL,aliasURL);
   await send({type:'native-arm',token:'long-token',count:2},aliasPage);
   browserItem={...item,id:45,state:'in_progress',referrer:aliasURL,bytesReceived:0};
@@ -148,18 +150,79 @@ async function contentFixture({count=2,selectable=true}={}) {
   const button={type:'submit',disabled:false,textContent:'Search',getAttribute:()=>null,getClientRects:()=>[{}],click(){events.push('native-search-click');resolveFinished();}};
   const form={action:'https://pubmed.ncbi.nlm.nih.gov/',method:'get',querySelectorAll:()=>[button]};
   const field={value:'',form,getClientRects:()=>[{}],focus(){},dispatchEvent(event){events.push(event.type);}};
-  const document={querySelector:()=>field};
+  const document={querySelector:()=>field,querySelectorAll:()=>[field]};
   const chrome={runtime:{sendMessage:async message=>{
     if(message.type==='native-ready')return {ok:true,value:{action:'submit-search',token:'long',term:fullTerm}};
     if(message.type==='native-search-submitted'){events.push('checkpoint-before-submit');return {ok:true,value:{ok:true}};}
     if(message.type==='native-error'){resolveFinished();throw new Error(message.error);}
     return {ok:true,value:{ok:true}};
   }}};
-  vm.runInNewContext(await readFile(new URL('./content.js',import.meta.url),'utf8'),{window:{},document,chrome,location:{href:searchEntryURL('long')},URL,getComputedStyle:()=>({visibility:'visible'}),Event:class{constructor(type){this.type=type;}},setTimeout});
+  vm.runInNewContext(contentSource,{window:{},document,chrome,location:{href:searchEntryURL('long')},URL,getComputedStyle:()=>({visibility:'visible'}),Event:class{constructor(type){this.type=type;}},setTimeout});
   await finished;
   assert.equal(field.value,fullTerm);assert.equal(form.method,'get');
   assert.deepEqual(events,['input','change','checkpoint-before-submit','native-search-click']);
   pass('long term is entered intact and submitted via original website handlers without rewriting form method or constructing a long GET');
+}
+
+{
+  const term='  ("air  pollution"[tiab]\r\nOR asthma[ti])\nAND\tchild[mh]  ';
+  const normalized=normalizeTerm(term);
+  assert.equal(normalized,'("air  pollution"[tiab] OR asthma[ti]) AND child[mh]');
+  assert(rootTerm({...config,term}).startsWith(`(${normalized}) AND `));
+  assert.equal(normalizeTerm(normalized),normalized);
+  assert.notEqual(normalizeTerm('asthma AND child'),normalizeTerm('asthma OR child'));
+  pass('multiline/tab normalization preserves quotes, interior phrase spaces, tags and Boolean operators in count queries');
+}
+async function writeSearchFixture(term,{wrapped=false,truncate=0,textarea=false,hiddenFirst=false}={}) {
+  let done;
+  const finished=new Promise(resolve=>{done=resolve;});
+  const actions=[];let wrapperCalls=0;
+  // Model the HTML single-line sanitization algorithm, unlike the old plain-object fixture.
+  class BrowserField {
+    constructor(){this._value='';this.tagName=textarea?'TEXTAREA':'INPUT';this.type=textarea?'textarea':'search';}
+    get value(){return this._value;}
+    set value(value){
+      let text=textarea?String(value).replace(/\r\n?/g,'\n'):String(value).replace(/[\r\n]/g,'');
+      if(truncate)text=text.slice(0,truncate);
+      this._value=text;
+    }
+    focus(){} dispatchEvent(event){actions.push(event.type);} getClientRects(){return [{}];}
+  }
+  const field=new BrowserField();
+  field.ownerDocument={defaultView:{HTMLInputElement:BrowserField,HTMLTextAreaElement:BrowserField}};
+  if(wrapped)Object.defineProperty(field,'value',{get(){return this._value;},set(){wrapperCalls++;}});
+  const nativeSetter=Object.getOwnPropertyDescriptor(BrowserField.prototype,'value').set;
+  if(!textarea && /[\r\n]/.test(term)) {
+    nativeSetter.call(field,term);assert.notEqual(field.value,term,'old strict raw comparison reproduces reported failure');
+    field._value='';
+  }
+  const button={type:'submit',disabled:false,textContent:'Search',getAttribute:()=>null,getClientRects:()=>[{}],click(){actions.push('submit');done({field,actions,wrapperCalls});}};
+  const form={action:'https://pubmed.ncbi.nlm.nih.gov/',querySelectorAll:()=>[button]};field.form=form;
+  const hidden={value:'hidden stale query',type:'hidden',getClientRects:()=>[]};
+  const document={querySelectorAll:()=>hiddenFirst?[hidden,field]:[field]};
+  const chrome={runtime:{sendMessage:async message=>{
+    if(message.type==='native-ready')return {ok:true,value:{action:'submit-search',token:'multiline',term}};
+    if(message.type==='native-search-submitted')return {ok:true,value:{ok:true}};
+    if(message.type==='native-error'){done({field,actions,error:message.error,wrapperCalls});return {ok:true,value:{ok:true}};}
+    return {ok:true,value:{ok:true}};
+  }}};
+  vm.runInNewContext(contentSource,{window:{},document,chrome,location:{href:searchEntryURL('multiline')},URL,getComputedStyle:()=>({visibility:'visible'}),Event:class{constructor(type){this.type=type;}},setTimeout});
+  return await finished;
+}
+{
+  const term='(asthma[ti]\r\nOR "air  pollution"[tiab])\nAND\tchild[mh]';
+  const result=await writeSearchFixture(term,{hiddenFirst:true});
+  assert.equal(result.error,undefined);assert.equal(result.field.value,normalizeTerm(term));assert(result.actions.includes('submit'));
+  pass('multiline query survives real-style single-line sanitization; hidden stale search input is ignored');
+  const area=await writeSearchFixture(term,{textarea:true});
+  assert.equal(area.error,undefined);assert.equal(area.field.value,normalizeTerm(term));
+  pass('textarea and single-line input use the same canonical query');
+  const wrapped=await writeSearchFixture(term,{wrapped:true});
+  assert.equal(wrapped.error,undefined);assert.equal(wrapped.wrapperCalls,0);assert(wrapped.actions.includes('submit'));
+  pass('native value setter bypasses a page-wrapped property while preserving input/change events');
+  const truncated=await writeSearchFixture(term,{truncate:10});
+  assert(truncated.error.includes('截短'));assert(!truncated.actions.includes('submit'));
+  pass('actual truncated query still blocks native submission instead of weakening integrity checks');
 }
 for(const filename of ['api.mjs','app.mjs','background.js','content.js','runner.mjs']) {
   const source=await readFile(new URL(filename,import.meta.url),'utf8');

@@ -1,3 +1,5 @@
+import './search-text.js';
+const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
 export const LIMIT = 9999;
 export const DAY = 86400000;
 export function dateNumber(value) {
@@ -15,7 +17,7 @@ export function validate(config) {
   if (!['dp', 'edat', 'crdt'].includes(config.field)) throw new Error('日期字段无效。');
   if (!Number.isInteger(config.limit) || config.limit < 100 || config.limit > LIMIT) throw new Error('每文件上限应为 100 至 9999。');
 }
-export function rootTerm(config) { return `(${config.term.trim()}) AND ${dateClause(config.start, config.end, config.field)}`; }
+export function rootTerm(config) { return `(${normalizeTerm(config.term)}) AND ${dateClause(config.start, config.end, config.field)}`; }
 export function nodeTerm(config, node) {
   let term = `(${rootTerm(config)}) AND ${dateClause(node.start, node.end, config.field)}`;
   if (node.lo !== undefined) term += ` AND ${node.lo}:${node.hi}[uid]`;

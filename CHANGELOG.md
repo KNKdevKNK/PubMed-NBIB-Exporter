@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.2 (2026-11-25)
+
+- Fix false search-input write failures for pasted multiline queries. Single-line HTML input sanitization removes CR/LF; normalize pasted line/tab separators to spaces before assignment.
+- Share normalization between count planning, content-script entry, and background result verification. Preserve operators, quotes, field tags, and interior phrase spaces.
+- Choose the visible editable search field and use the native DOM value setter when page code wraps the value property.
+- Continue to block actual truncation, altered operators, and changes immediately before submission.
+- Add five regression checks covering multiline CRLF input, textareas, hidden fields, page-wrapped setters, and true truncation. All 23 offline checks pass.
+
 ## 2.0.1
 
 - Submit complete queries through PubMed's native search form instead of constructing oversized GET URLs.

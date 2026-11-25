@@ -1,6 +1,7 @@
 (() => {
   if (window.__pubmedNativeExporter) return;
   window.__pubmedNativeExporter=true;
+  const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
   const visible=el=>Boolean(el && el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
   const normalize=text=>String(text || '').replace(/\s+/g,' ').trim();
   const label=el=>normalize(el.getAttribute('aria-label') || el.value || el.textContent);
@@ -31,9 +32,18 @@
     return null;
   }
   function searchField() {
-    return document.querySelector('input#id_term, textarea#id_term, input[name="term"], textarea[name="term"]');
+    const selector='input#id_term, textarea#id_term, input[name="term"], textarea[name="term"]';
+    return [...document.querySelectorAll(selector)].find(field=>
+      typeof field.value==='string' && !field.disabled && !field.readOnly && field.type!=='hidden' && visible(field));
   }
-  function displayedTerm() {return searchField()?.value || '';}
+  function displayedTerm() {return normalizeTerm(searchField()?.value || '');}
+  function setSearchValue(field,value) {
+    // Use the browser's native setter when a page framework wraps .value.
+    const view=field.ownerDocument?.defaultView;
+    const prototype=field.tagName==='TEXTAREA'?view?.HTMLTextAreaElement?.prototype:view?.HTMLInputElement?.prototype;
+    const setter=prototype && Object.getOwnPropertyDescriptor(prototype,'value')?.set;
+    if(setter) setter.call(field,value);else field.value=value;
+  }
   async function submitSearch(task) {
     const data={token:task.token};
     try {
@@ -42,15 +52,18 @@
       if(!form || new URL(form.action || location.href,location.href).origin!=='https://pubmed.ncbi.nlm.nih.gov') throw new Error('未找到 PubMed 原生搜索表单。');
       // Preserve the site's method and submit handlers. They can turn a long
       // search into PubMed's own short longquery URL. Never construct that token.
-      field.focus();field.value=task.term;
+      const expected=normalizeTerm(task.term);
+      field.focus();setSearchValue(field,expected);
       field.dispatchEvent(new Event('input',{bubbles:true}));
       field.dispatchEvent(new Event('change',{bubbles:true}));
-      if(field.value!==task.term) throw new Error('完整检索式未能写入搜索框，已停止。');
+      const actual=normalizeTerm(field.value);
+      if(actual!==expected) throw new Error(`搜索框内容被截短或修改，已停止（预计 ${expected.length} 字符，实际 ${actual.length} 字符）。`);
       const button=[...form.querySelectorAll('button,input[type="submit"]')].find(el=>visible(el) && !el.disabled &&
         (el.type==='submit' || /^Search$/i.test(label(el))));
       if(!button && typeof form.requestSubmit!=='function') throw new Error('找不到原生搜索按钮。');
       const armed=await rpc('native-search-submitted',data);
       if(!armed?.ok) throw new Error('无法确认搜索提交状态，请重试。');
+      if(normalizeTerm(searchField()?.value)!==expected) throw new Error('搜索框在提交前被网页改动，已停止，请重试。');
       if(button) button.click();else form.requestSubmit();
     } catch(error) {await rpc('native-error',{...data,error:error.message});}
   }

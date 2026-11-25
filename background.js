@@ -1,3 +1,5 @@
+import './search-text.js';
+const normalizeTerm=globalThis.PubMedNBIBSearch.normalizeTerm;
 import {terminal,searchEntryURL,samePubMedTab,ownedPage,isNativeDownload,safeFilename,checkNativeFile} from './native-policy.mjs';
 let queue = Promise.resolve();
 function serial(fn) {const result=queue.then(fn);queue=result.catch(()=>{});return result;}
@@ -64,7 +66,7 @@ async function handle(message,sender) {
     if(pending.status!=='searching') return null;
     // The resulting URL may contain a PubMed-generated longquery token rather
     // than the original query. Verify the displayed full search term instead.
-    if(typeof message.pageTerm!=='string' || message.pageTerm.trim()!==pending.term.trim()) {
+    if(typeof message.pageTerm!=='string' || normalizeTerm(message.pageTerm)!==normalizeTerm(pending.term)) {
       pending.status='error';pending.error='无法确认网页中的完整检索式。请检查 PubMed 是否显示验证页面或 414 错误，再回工具页重试。';await save(pending);return null;
     }
     pending.resultURL=url.href;pending.status='working';pending.stage='已通过网页表单检索，正在检查结果数量';pending.updated=Date.now();await save(pending);

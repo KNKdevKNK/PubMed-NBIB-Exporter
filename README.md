@@ -2,9 +2,9 @@
 
 Chrome / Edge 浏览器扩展：自动拆分 PubMed 检索范围，通过网页原生 **Send to → Citation manager → All results → Create file** 批量下载 NBIB，供 EndNote 等文献管理软件导入。
 
-**当前版本：2.0.1** · 中文界面 · Manifest V3 · 无需服务器和 API Key
+**当前版本：2.0.2** · 中文界面 · Manifest V3 · 无需服务器和 API Key
 
-[下载 v2.0.1 安装包](dist/PubMed-NBIB-Native-v2.0.1.zip) · [详细使用说明](使用说明.md) · [English](README.en.md)
+[下载 v2.0.2 安装包](dist/PubMed-NBIB-Native-v2.0.2.zip) · [详细使用说明](使用说明.md) · [English](README.en.md)
 
 ## 解决的问题
 
@@ -21,13 +21,15 @@ PubMed 网页单次 Citation manager 导出最多 10000 条。面对超过上限
 - 使用原生搜索框提交完整检索式，兼容网站生成的 longquery 短链接，避免插件拼出超长 URL。
 - 支持当前分段完成后暂停、断点恢复、保存任务清单。
 
+v2.0.2 修复多行检索式被单行搜索框清除换行后误报“完整检索式未能写入”的问题。换行和制表符在数量查询、网页写入和结果页校验前统一转为空格；真实截断仍会停止。
+
 ## 安装
 
 1. 下载上面的 ZIP 安装包并解压。
 2. Chrome 地址栏打开 `chrome://extensions`；Edge 打开 `edge://extensions`。
 3. 开启“开发者模式”，点击“加载已解压的扩展程序”。
 4. 选择**直接包含 manifest.json 的文件夹**。
-5. 点击扩展图标，确认页面顶部显示 `原生 SEND TO 导出 · v2.0.1`。
+5. 点击扩展图标，确认页面顶部显示 `原生 SEND TO 导出 · v2.0.2`。
 
 也可在 GitHub 点击 **Code → Download ZIP**，解压后加载仓库根目录。此项目尚未上架 Chrome / Edge 扩展商店。
 
@@ -54,7 +56,7 @@ PubMed 网页单次 Citation manager 导出最多 10000 条。面对超过上限
 - 每段篇数是网页导出前显示的数量，未读取原生文件内容逐条核验。分段篇数之和不代表去重后总数。
 - PubMed 会持续更新。界面会核对网页数量与接口预计数量，但不提供数据库快照保证。
 - 网页结构、浏览器策略、验证页面或其他下载扩展可能影响运行。失败时停止，不会自动切换为 API 内容下载。
-- v2.0.1 已获用户试用成功反馈，并通过 18 项离线测试；维护环境尚未独立完成浏览器与 EndNote 端到端验证，也未验证十万篇规模。建议先跑小范围。
+- v2.0.1 已获用户试用成功反馈，并通过 23 项离线测试；维护环境尚未独立完成浏览器与 EndNote 端到端验证，也未验证十万篇规模。建议先跑小范围。
 
 ## 权限与隐私
 
@@ -80,7 +82,7 @@ python scripts/package.py
 
 `test.mjs` 使用模拟网页和浏览器 API，覆盖拆分、原生按钮流程、下载归属、长检索式、原生短链接、空文件拒绝和断点恢复。这些测试不等于真实网页端到端测试。
 
-`python scripts/package.py` 生成 `dist/PubMed-NBIB-Native-v2.0.1.zip` 和 SHA-256 校验文件。安装包通过显式文件列表构建，不包含个人检索任务、下载记录或本机缓存。
+`python scripts/package.py` 生成 `dist/PubMed-NBIB-Native-v2.0.2.zip` 和 SHA-256 校验文件。安装包通过显式文件列表构建，不包含个人检索任务、下载记录或本机缓存。
 
 ## 反馈
 
