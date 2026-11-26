@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.4 (2026-11-26)
+
+- Fix a literal U+0008 backspace in the Send to detection regex. It prevented normal result pages from reporting their visible export control and caused repeated readiness timeouts.
+- Reproduce the defect with a failing collected-evidence assertion before fixing it; pass the collected DOM evidence to the real result verifier.
+- Scan runtime source for unexpected invisible ASCII controls in tests and syntax checks.
+- Report specifically whether the result count, result marker, or Send to button could not be detected.
+- All 33 offline checks pass. This is not a live PubMed download certification.
+
 ## 2.0.3 (2026-11-25)
 
 - Stop treating every missing or non-identical result-page input as a CAPTCHA/HTTP 414 error.

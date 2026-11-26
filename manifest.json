@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PubMed 原生 NBIB 分段导出",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "自动拆分日期，在 PubMed 网页执行 Send to → Citation manager → Create file，保留原生 NBIB。",
   "permissions": [
     "downloads",
@@ -32,5 +32,5 @@
     }
   ],
   "minimum_chrome_version": "109",
-  "version_name": "2.0.3 原生网页导出版（结果页来源核对修复）"
+  "version_name": "2.0.4 原生网页导出版（Send to 控件识别修复）"
 }

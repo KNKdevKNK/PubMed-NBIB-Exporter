@@ -82,7 +82,7 @@
     if(/Submitted URI too large|Error 414/i.test(title+' '+heading))pageError='http-414';
     else if(pageCount===null && /checking your browser|recaptcha|verify you are human/i.test(title+' '+heading))pageError='verification-page';
     return {pageTerm:displayedTerm(),pageTerms:terms,pageCount,hasResults:pageCount!==null,
-      hasExportControls:Boolean(control(/^Send to/i)),pageError};
+      hasExportControls:Boolean(control(/^Send to\b/i)),pageError};
   }
   async function run() {
     let task;

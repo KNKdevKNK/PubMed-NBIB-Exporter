@@ -26,11 +26,16 @@ export function requestMatchesTerm(details,expected) {
 }
 export function assessResult(pending,message,pageURL) {
   const diagnostics={count:Number.isInteger(message.pageCount)?message.pageCount:null,
-    sources:[],expectedLength:normalize(pending.term).length};
+    sources:[],expectedLength:normalize(pending.term).length,hasResults:Boolean(message.hasResults),hasExportControls:Boolean(message.hasExportControls)};
   if(message.pageError)return {ok:false,retry:false,code:message.pageError,error:message.pageError==='http-414'?
     '网页明确显示 HTTP 414：PubMed 未能处理本次原生搜索提交。':'网页正在进行浏览器验证，请在专用 PubMed 页手动处理后回工具页重试。',diagnostics};
-  if(!message.hasResults || !message.hasExportControls || diagnostics.count===null)
-    return {ok:false,retry:true,code:'loading',error:'结果页控件尚未就绪',diagnostics};
+  if(!message.hasResults || !message.hasExportControls || diagnostics.count===null) {
+    const missing=[];
+    if(diagnostics.count===null)missing.push('未读到结果总数');
+    if(!message.hasResults)missing.push('未识别结果列表标记');
+    if(!message.hasExportControls)missing.push('未识别 Send to 按钮');
+    return {ok:false,retry:true,code:'loading',error:'结果页识别未完成：'+missing.join('；'),diagnostics};
+  }
   const terms=Array.isArray(message.pageTerms)?[...message.pageTerms]:[];
   if(typeof message.pageTerm==='string')terms.push({source:'search-input',value:message.pageTerm});
   let urlTerm='';

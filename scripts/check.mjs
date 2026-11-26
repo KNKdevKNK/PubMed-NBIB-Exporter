@@ -7,6 +7,8 @@ assert.equal(manifest.version,pkg.version);
 assert.deepEqual(manifest.content_scripts[0].js,['search-text.js','content.js']);
 assert.deepEqual(manifest.host_permissions,['https://pubmed.ncbi.nlm.nih.gov/*','https://eutils.ncbi.nlm.nih.gov/*']);
 for(const file of ['api.mjs','app.mjs','background.js','search-text.js','content.js','core.mjs','native-policy.mjs','runner.mjs','result-check.mjs','test.mjs']) {
+  const source=await readFile(new URL('../'+file,import.meta.url),'utf8');
+  assert(![...source].some(c=>c.charCodeAt(0)<32 && ![9,10,13].includes(c.charCodeAt(0))),file+' contains a hidden control character');
   const result=spawnSync(process.execPath,['--check',file],{cwd:new URL('../',import.meta.url),stdio:'inherit'});
   if(result.status!==0) process.exit(result.status || 1);
 }

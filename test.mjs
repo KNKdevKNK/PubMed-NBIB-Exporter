@@ -267,6 +267,8 @@ async function writeSearchFixture(term,{wrapped=false,truncate=0,textarea=false,
   pass('verified complete native request binds a shortened UI representation to the original search');
   const loading=assessResult(base,{...evidence,hasExportControls:false},url);
   assert(!loading.ok && loading.retry && loading.code==='loading');
+  assert(loading.error.includes('Send to'));
+  assert.equal(loading.diagnostics.hasExportControls,false);
   const challenge=assessResult(base,{...evidence,pageError:'verification-page'},url);
   assert(!challenge.ok && !challenge.retry && challenge.error.includes('验证'));
   const tooLong=assessResult(base,{...evidence,pageError:'http-414'},url);
@@ -286,9 +288,19 @@ async function writeSearchFixture(term,{wrapped=false,truncate=0,textarea=false,
   const loaded=await contentFixture({waitReady:true,metadataTerm:term});
   assert.equal(loaded.readyMessages.length,2);
   assert.equal(loaded.readyMessages[1].pageCount,2);
+  assert.equal(loaded.readyMessages[1].hasExportControls,true,'visible Send to must be recognized before result verification');
+  assert(assessResult({term,expected:2},loaded.readyMessages[1],nativeURL(term)).ok,'actual collected DOM evidence must pass the real verifier');
   assert(loaded.readyMessages[1].pageTerms.some(item=>item.source==='meta-ncbi_term' && item.value===term));
   assert.deepEqual(loaded.actions,['Send to','Citation manager','Create file']);
   pass('content waits for ready evidence, reads full-query metadata and then performs native export');
+}
+{
+  for(const filename of ['api.mjs','app.mjs','background.js','content.js','core.mjs','native-policy.mjs','result-check.mjs','search-text.js','runner.mjs']) {
+    const source=await readFile(new URL(filename,import.meta.url),'utf8');
+    const bad=[...source].filter(c=>c.charCodeAt(0)<32 && ![9,10,13].includes(c.charCodeAt(0)));
+    assert.equal(bad.length,0,`${filename} contains a hidden ASCII control character`);
+  }
+  pass('runtime source contains no invisible control characters that can corrupt regex matching');
 }
 for(const filename of ['api.mjs','app.mjs','background.js','content.js','runner.mjs']) {
   const source=await readFile(new URL(filename,import.meta.url),'utf8');
